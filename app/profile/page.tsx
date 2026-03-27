@@ -368,7 +368,7 @@ function ProfileContent() {
                   {projects.map((project) => (
                     <div key={project.id} className="bg-background border border-border rounded-2xl overflow-hidden flex flex-col group hover:border-primary/50 transition-colors shadow-sm">
                       <div className="relative aspect-video bg-black cursor-pointer" onClick={() => router.push(`/create?projectId=${project.id}`)}>
-                        <div className="absolute inset-0 flex items-center justify-center opacity-80 group-hover:opacity-100 transition-opacity duration-500">
+                        <div className="absolute inset-0 flex items-center justify-center opacity-80 group-hover:opacity-100 transition-opacity duration-500 overflow-hidden" dir="ltr">
                           {project.code ? (
                             <Thumbnail
                               component={DynamicVideo}

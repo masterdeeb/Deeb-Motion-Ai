@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { Sparkles, Clock, MonitorPlay, Smartphone, Play, ArrowRight, Wand2, ChevronDown, Zap, FolderOpen, Code } from "lucide-react";
+import { Sparkles, Clock, MonitorPlay, Smartphone, Play, ArrowRight, Wand2, ChevronDown, Zap, FolderOpen, Code, Image as ImageIcon, Plus, Repeat } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -20,6 +20,9 @@ export default function LandingPage() {
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [isFocused, setIsFocused] = useState(false);
   const [isDurationOpen, setIsDurationOpen] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isSeamlessLoop, setIsSeamlessLoop] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [projects, setProjects] = useState<any[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const router = useRouter();
@@ -63,14 +66,33 @@ export default function LandingPage() {
 
   const handleGenerate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (prompt.trim()) {
+    if (prompt.trim() || selectedImage) {
+      if (selectedImage) {
+        sessionStorage.setItem('initial_image', selectedImage);
+      } else {
+        sessionStorage.removeItem('initial_image');
+      }
+      
+      const loopParam = isSeamlessLoop ? "&loop=true" : "";
+      
       if (inputType === "prompt") {
-        router.push(`/create?prompt=${encodeURIComponent(prompt)}&duration=${duration}&ratio=${aspectRatio}`);
+        router.push(`/create?prompt=${encodeURIComponent(prompt || (language === "ar" ? "صورة مرفقة" : "Attached image"))}&duration=${duration}&ratio=${aspectRatio}${loopParam}`);
       } else {
         localStorage.setItem("custom_remotion_code", prompt);
-        router.push(`/create?mode=code&duration=${duration}&ratio=${aspectRatio}`);
+        router.push(`/create?mode=code&duration=${duration}&ratio=${aspectRatio}${loopParam}`);
       }
     }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setSelectedImage(reader.result as string);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -248,39 +270,102 @@ export default function LandingPage() {
               </button>
             </div>
 
-            <div className="relative bg-slate-950/50 rounded-2xl border border-white/5 p-6 mb-8">
+            <div 
+              className="relative bg-slate-950/50 rounded-2xl border border-white/5 p-6 mb-8"
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const file = e.dataTransfer.files?.[0];
+                if (file && file.type.startsWith('image/')) {
+                  const reader = new FileReader();
+                  reader.onloadend = () => setSelectedImage(reader.result as string);
+                  reader.readAsDataURL(file);
+                }
+              }}
+              onPaste={(e) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.indexOf('image') !== -1) {
+                    const file = items[i].getAsFile();
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onloadend = () => setSelectedImage(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }
+                    break;
+                  }
+                }
+              }}
+            >
+              {selectedImage && (
+                <div className="relative w-24 h-24 mb-4 rounded-xl overflow-hidden border border-white/10">
+                  <img src={selectedImage} alt="Selected" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setSelectedImage(null)}
+                    className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 hover:bg-black/70 transition-colors"
+                  >
+                    <Plus className="h-4 w-4 rotate-45" />
+                  </button>
+                </div>
+              )}
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 onFocus={() => setIsFocused(true)}
                 onBlur={() => setIsFocused(false)}
                 placeholder={inputType === "prompt" ? t("form.placeholder") : t("create.pasteCode")}
-                className={`w-full bg-transparent border-none resize-none focus:ring-0 focus:outline-none placeholder:text-slate-500 text-slate-200 ${inputType === "code" ? "font-mono text-sm min-h-[300px]" : "text-2xl min-h-[260px]"}`}
-                required
+                className={`w-full bg-transparent border-none resize-none focus:ring-0 focus:outline-none placeholder:text-slate-500 text-slate-200 ${inputType === "code" ? "font-mono text-sm min-h-[200px] sm:min-h-[300px]" : "text-xl sm:text-2xl min-h-[150px] sm:min-h-[260px]"}`}
+                required={!selectedImage && inputType === "prompt"}
               />
               
-              {inputType === "code" && (
-                <div className="absolute bottom-5 left-5">
-                  <label className="flex items-center space-x-2 rtl:space-x-reverse cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-200 bg-slate-900 px-3 py-1.5 rounded-lg border border-white/10 transition-colors">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-                    <span>{t("create.uploadFile")}</span>
+              {/* Bottom Controls inside Textarea container */}
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                {inputType === "code" && (
+                  <div>
+                    <label className="flex items-center space-x-2 rtl:space-x-reverse cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-200 bg-slate-900 px-3 py-1.5 rounded-lg border border-white/10 transition-colors w-fit">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                      <span>{t("create.uploadFile")}</span>
+                      <input
+                        type="file"
+                        accept=".tsx,.ts,.txt"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {inputType === "prompt" && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center space-x-2 rtl:space-x-reverse cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-200 bg-slate-900 px-3 py-1.5 rounded-lg border border-white/10 transition-colors w-fit"
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                      <span>{language === "ar" ? "إرفاق صورة" : "Attach Image"}</span>
+                    </button>
                     <input
                       type="file"
-                      accept=".tsx,.ts,.txt"
-                      onChange={handleFileUpload}
+                      ref={fileInputRef}
+                      onChange={handleImageUpload}
+                      accept="image/*"
                       className="hidden"
                     />
-                  </label>
-                </div>
-              )}
+                  </div>
+                )}
 
-              <div className="absolute bottom-5 right-5 flex items-center gap-1.5 text-xs font-bold text-cyan-400 uppercase tracking-wider">
-                {t("form.proModel")} <Zap className="w-4 h-4 fill-current" />
+                <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-400 uppercase tracking-wider self-start sm:self-auto">
+                  {t("form.proModel")} <Zap className="w-4 h-4 fill-current" />
+                </div>
               </div>
             </div>
             
             <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-              <div className="flex items-center gap-8 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-4 sm:gap-8 w-full sm:w-auto">
                 {/* Custom Duration Selector */}
                 <div className="space-y-2 relative">
                   {isDurationOpen && (
@@ -330,6 +415,25 @@ export default function LandingPage() {
                   </motion.div>
                 </div>
 
+                {/* Seamless Loop Toggle */}
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">
+                    {language === "ar" ? "تكرار مستمر" : "Seamless Loop"}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsSeamlessLoop(!isSeamlessLoop)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-colors text-sm font-medium ${
+                      isSeamlessLoop 
+                        ? 'bg-purple-500/20 border-purple-500/50 text-purple-300' 
+                        : 'bg-slate-950/50 border-white/5 text-slate-400 hover:bg-slate-900 hover:text-slate-300'
+                    }`}
+                  >
+                    <Repeat className="w-4 h-4" />
+                    <span>{isSeamlessLoop ? (language === "ar" ? "مفعل" : "Enabled") : (language === "ar" ? "معطل" : "Disabled")}</span>
+                  </button>
+                </div>
+
                 {/* Aspect Ratio Selector */}
                 <div className="space-y-2">
                   <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">{t("form.ratio.label")}</label>
@@ -364,6 +468,70 @@ export default function LandingPage() {
             </div>
           </form>
         </motion.div>
+      </section>
+
+      {/* Features Section */}
+      <section className="w-full max-w-7xl px-4 py-16 md:py-24 relative z-10">
+        <div className="text-center mb-16">
+          <h2 className="text-3xl md:text-4xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+            {language === "ar" ? "مميزات التطبيق" : "App Features"}
+          </h2>
+          <p className="text-slate-400 max-w-2xl mx-auto">
+            {language === "ar" 
+              ? "اكتشف القوة الكامنة في Deeb Motion Ai وكيف يمكنه تحويل أفكارك إلى واقع" 
+              : "Discover the power of Deeb Motion Ai and how it can turn your ideas into reality"}
+          </p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {[
+            {
+              icon: <Wand2 className="w-8 h-8 text-purple-400" />,
+              title: language === "ar" ? "توليد ذكي" : "Smart Generation",
+              desc: language === "ar" ? "تحويل النصوص والصور إلى فيديوهات موشن جرافيك احترافية بضغطة زر" : "Transform text and images into professional motion graphics with one click"
+            },
+            {
+              icon: <Repeat className="w-8 h-8 text-cyan-400" />,
+              title: language === "ar" ? "تكرار لا نهائي" : "Seamless Loop",
+              desc: language === "ar" ? "إنشاء فيديوهات متصلة ببعضها بدون أي انقطاع أو قفزات في الإطارات" : "Create continuous videos without any cuts or frame jumps"
+            },
+            {
+              icon: <Code className="w-8 h-8 text-emerald-400" />,
+              title: language === "ar" ? "تعديل الكود" : "Code Editing",
+              desc: language === "ar" ? "تحكم كامل في كود الفيديو (React/Remotion) لتخصيص كل تفصيلة" : "Full control over the video code (React/Remotion) to customize every detail"
+            },
+            {
+              icon: <Clock className="w-8 h-8 text-amber-400" />,
+              title: language === "ar" ? "سرعة فائقة" : "Lightning Fast",
+              desc: language === "ar" ? "توليد الفيديوهات في ثوانٍ معدودة بفضل خوادم الذكاء الاصطناعي المتقدمة" : "Generate videos in seconds thanks to advanced AI servers"
+            },
+            {
+              icon: <MonitorPlay className="w-8 h-8 text-rose-400" />,
+              title: language === "ar" ? "أبعاد متعددة" : "Multiple Ratios",
+              desc: language === "ar" ? "دعم كامل لأبعاد الشاشات المختلفة (16:9 لليوتيوب، 9:16 للتيك توك)" : "Full support for different screen ratios (16:9 for YouTube, 9:16 for TikTok)"
+            },
+            {
+              icon: <FolderOpen className="w-8 h-8 text-blue-400" />,
+              title: language === "ar" ? "إدارة المشاريع" : "Project Management",
+              desc: language === "ar" ? "حفظ مشاريعك في السحابة والعودة لتعديلها في أي وقت ومن أي مكان" : "Save your projects in the cloud and edit them anytime, anywhere"
+            }
+          ].map((feature, i) => (
+            <motion.div 
+              key={i} 
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: i * 0.1 }}
+              className="bg-slate-900/50 border border-white/5 rounded-2xl p-6 hover:bg-slate-800/50 transition-colors group"
+            >
+              <div className="bg-slate-950 w-16 h-16 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-lg shadow-black/50">
+                {feature.icon}
+              </div>
+              <h3 className="text-xl font-bold text-white mb-3">{feature.title}</h3>
+              <p className="text-slate-400 leading-relaxed text-sm">{feature.desc}</p>
+            </motion.div>
+          ))}
+        </div>
       </section>
 
       {/* How it Works Section */}
@@ -590,7 +758,7 @@ export default function LandingPage() {
                 className="group relative rounded-2xl overflow-hidden border border-border/50 bg-black aspect-video cursor-pointer shadow-sm hover:shadow-2xl hover:shadow-primary/20 hover:border-primary/50 transition-all duration-500"
                 onClick={() => router.push(`/create?projectId=${project.id}`)}
               >
-                <div className="absolute inset-0 flex items-center justify-center opacity-70 group-hover:opacity-100 transition-opacity duration-500">
+                <div className="absolute inset-0 flex items-center justify-center opacity-70 group-hover:opacity-100 transition-opacity duration-500 overflow-hidden" dir="ltr">
                   {project.code ? (
                     <Thumbnail
                       component={DynamicVideo}

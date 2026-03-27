@@ -2,7 +2,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-export async function generateVideoScript(prompt: string, durationInSeconds: number, fps: number = 30, currentCode?: string, imageBase64?: string) {
+export async function generateVideoScript(prompt: string, durationInSeconds: number, fps: number = 30, currentCode?: string, imageBase64?: string, isSeamlessLoop?: boolean) {
   try {
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     if (!apiKey) {
@@ -11,7 +11,7 @@ export async function generateVideoScript(prompt: string, durationInSeconds: num
 
     const ai = new GoogleGenAI({ apiKey });
 
-    const systemPrompt = `Role
+    let systemPrompt = `Role
 You are an expert Remotion video developer and a helpful AI assistant.
 Your task is to generate or modify a production-ready TSX file based on the user's description.
 
@@ -113,6 +113,14 @@ Subtle background elements like gradients or particles to add depth
 Text shadows or glows to improve readability
 Smooth easing on all transitions
 `;
+
+    if (isSeamlessLoop) {
+      systemPrompt += `\n\nSEAMLESS LOOP REQUIREMENT:
+The user has requested a SEAMLESS LOOP video. You MUST ensure that the very last frame of the animation perfectly matches the very first frame.
+- Animate elements so they return to their exact starting positions, opacities, and scales by the end of the duration.
+- Use math like \`Math.sin(frame / durationInFrames * Math.PI * 2)\` to create perfect cyclic animations.
+- Ensure there are no sudden jumps or cuts when the video restarts.`;
+    }
 
     const userText = currentCode 
       ? `Current Code:\n\`\`\`tsx\n${currentCode}\n\`\`\`\n\nUser Request: "${prompt}"\n\nPlease modify the current code to fulfill the user's request.`

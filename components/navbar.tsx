@@ -91,7 +91,7 @@ export function Navbar() {
                       className="flex items-center justify-center w-9 h-9 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition-colors overflow-hidden ring-2 ring-transparent hover:ring-purple-500/30 focus:outline-none relative"
                     >
                       {userData?.photoURL ? (
-                        <Image src={userData.photoURL} alt="Profile" fill className="object-cover" referrerPolicy="no-referrer" />
+                        <Image src={userData.photoURL} alt="Profile" fill sizes="36px" className="object-cover" referrerPolicy="no-referrer" />
                       ) : (
                         <User className="h-4 w-4" />
                       )}

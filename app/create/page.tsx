@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense, useRef, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
-import { Send, Download, Plus, Play, Pause, Settings2, Sparkles, Bot, User, Loader2, Image as ImageIcon, Code, Upload } from "lucide-react";
+import { Send, Download, Plus, Play, Pause, Settings2, Sparkles, Bot, User, Loader2, Image as ImageIcon, Code, Upload, Repeat, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { useLanguage } from "@/components/language-provider";
 import { generateVideoScript } from "@/utils/generate";
@@ -58,15 +58,23 @@ const ColorInput = ({ originalColor, onApply }: { originalColor: string, onApply
   );
 };
 
+const unescapeHtml = (text: string) => {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#123;/g, "{")
+    .replace(/&#125;/g, "}");
+};
+
 const TextInput = ({ originalText, onApply }: { originalText: string, onApply: (t: string) => void }) => {
-  const [val, setVal] = useState(originalText);
+  const [val, setVal] = useState(unescapeHtml(originalText));
   
   useEffect(() => {
-    setVal(originalText);
+    setVal(unescapeHtml(originalText));
   }, [originalText]);
 
   const handleBlur = () => {
-    if (val !== originalText) {
+    if (val !== unescapeHtml(originalText)) {
       onApply(val);
     }
   };
@@ -99,14 +107,16 @@ function CreateContent() {
   const initialDurationStr = searchParams.get("duration") || "5s";
   const initialRatio = searchParams.get("ratio") || "16:9";
   const projectIdParam = searchParams.get("projectId");
+  const initialLoop = searchParams.get("loop") === "true";
   
   const { t, dir, language } = useLanguage();
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
-    { id: "1", role: "ai", content: t("create.initialAiMsg") }
+    { id: "1", role: "ai", content: t("create.initialAiMsg") || "Hello! I'm Deeb Motion AI. How can I help you create a video today?" }
   ]);
   const [input, setInput] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isSeamlessLoop, setIsSeamlessLoop] = useState(initialLoop);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string>("");
@@ -118,6 +128,7 @@ function CreateContent() {
   const [activeView, setActiveView] = useState<"preview" | "code">("preview");
   const [editedCode, setEditedCode] = useState<string>("");
   const [showProperties, setShowProperties] = useState(false);
+  const [mobileView, setMobileView] = useState<"chat" | "preview">("chat");
   const playerRef = useRef<PlayerRef>(null);
 
   const fps = 30;
@@ -138,14 +149,33 @@ function CreateContent() {
 
   const extractedTexts = useMemo(() => {
     if (!generatedCode) return [];
-    const textRegex = />\s*([^<{}]+?)\s*</g;
+    // Match text between > and < where < is followed by a letter or / (start of a tag or closing tag)
+    const textRegex = />\s*([^<{}]+?)\s*<(?=[a-zA-Z/])/g;
     const matches = new Set<string>();
     let match;
+    
+    // JS keywords and operators that strongly indicate the text is actually JS code
+    const jsIndicators = [
+      "const ", "let ", "var ", "function ", "return ", "import ", "export ", 
+      "if (", "else ", "for (", "while (", "switch (", "case ", "break;", 
+      "continue;", "typeof ", "instanceof ", "new ", "try {", "catch (", 
+      "finally {", "throw ", "class ", "extends ", "await ", "async ",
+      "=>", "===", "!==", "&&", "||", " ? ", " : "
+    ];
+
     while ((match = textRegex.exec(generatedCode)) !== null) {
       const text = match[1].trim();
-      if (text.length > 0 && text !== " ") {
-        matches.add(text);
-      }
+      
+      if (text.length === 0 || text === " ") continue;
+      
+      // Must contain at least one letter or number
+      if (!/[a-zA-Z\u0600-\u06FF0-9]/.test(text)) continue;
+      
+      // Check for JS indicators
+      const isLikelyJsCode = jsIndicators.some(indicator => text.includes(indicator));
+      if (isLikelyJsCode) continue;
+      
+      matches.add(text);
     }
     return Array.from(matches);
   }, [generatedCode]);
@@ -158,9 +188,10 @@ function CreateContent() {
   };
 
   const handleReplaceText = (oldText: string, newText: string) => {
-    if (oldText === newText) return;
+    if (unescapeHtml(oldText) === newText) return;
     const regex = new RegExp(`(>\\s*)${escapeRegExp(oldText)}(\\s*<)`, 'g');
-    const newCode = generatedCode.replace(regex, `$1${newText}$2`);
+    const safeNewText = newText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/{/g, "&#123;").replace(/}/g, "&#125;");
+    const newCode = generatedCode.replace(regex, `$1${safeNewText}$2`);
     setGeneratedCode(newCode);
     setEditedCode(newCode);
   };
@@ -247,7 +278,7 @@ function CreateContent() {
     setIsGenerating(true);
     
     try {
-      const result = await generateVideoScript(userPrompt, durationInSeconds, fps, currentCode, imageBase64);
+      const result = await generateVideoScript(userPrompt, durationInSeconds, fps, currentCode, imageBase64, isSeamlessLoop);
       
       if (result.success && result.code) {
         setGeneratedCode(result.code);
@@ -278,79 +309,56 @@ function CreateContent() {
   const handleExport = async () => {
     if (!generatedCode) return;
     
-    // 1. Trigger GitHub Actions export in the background
-    fetch("/api/render", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: generatedCode, ratio, durationInSeconds })
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.success) {
-        console.log("GitHub Render started successfully.");
-      } else {
-        console.error("GitHub Render failed:", data.error);
-      }
-    })
-    .catch(error => {
-      console.error("Error starting GitHub render:", error);
-    });
+    setIsRendering(true);
+    
+    // Show a message to the user
+    const loadingMessageId = generateId();
+    setMessages(prev => [...prev, { 
+      id: loadingMessageId, 
+      role: "ai", 
+      content: language === "ar" 
+        ? "جاري التصدير وتجهيز الفيديو، قد يستغرق الأمر بعض الوقت..." 
+        : "Exporting and preparing the video, this may take some time..."
+    }]);
 
-    // 2. Start browser recording
     try {
-      alert("تم إرسال طلب الرندرة إلى GitHub في الخلفية.\n\nوسنقوم أيضاً بتسجيل الفيديو من المتصفح الآن.\nالرجاء اختيار 'هذه العلامة' (This Tab) من النافذة التي ستظهر لك، والتأكد من تفعيل 'مشاركة الصوت' (Share audio) إذا لزم الأمر.");
+      const renderUrl = process.env.NEXT_PUBLIC_RENDERER_URL || "https://render-deeb-motion-ai.up.railway.app/api/render";
       
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: "browser" },
-        audio: true,
-        preferCurrentTab: true,
-      } as any);
+      const response = await fetch(renderUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: generatedCode, ratio, durationInSeconds })
+      });
 
-      setIsRendering(true);
-
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-      const chunks: Blob[] = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: "video/webm" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "motion-video.webm";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
-        setIsRendering(false);
-      };
-
-      // Start recording
-      mediaRecorder.start();
-
-      // Play the video from the beginning
-      if (playerRef.current) {
-        playerRef.current.seekTo(0);
-        playerRef.current.play();
+      if (!response.ok) {
+        throw new Error(`Failed to render video: ${response.statusText}`);
       }
 
-      // Stop recording after the video duration
-      setTimeout(() => {
-        mediaRecorder.stop();
-        if (playerRef.current) {
-          playerRef.current.pause();
-        }
-      }, durationInSeconds * 1000 + 500); // Add 500ms buffer
-
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "motion-video.mp4";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      
+      setMessages(prev => [...prev, { 
+        id: generateId(), 
+        role: "ai", 
+        content: language === "ar" ? "تم تصدير الفيديو بنجاح! 🎉" : "Video exported successfully! 🎉"
+      }]);
     } catch (error) {
-      console.error("Recording error:", error);
-      alert("تم إلغاء التسجيل من المتصفح أو حدث خطأ (قد يكون بسبب قيود المتصفح الحالية).\n\nلا تقلق، سيستمر التصدير عبر GitHub في الخلفية ويمكنك تحميله من هناك لاحقاً.");
+      console.error("Render error:", error);
+      setMessages(prev => [...prev, { 
+        id: generateId(), 
+        role: "ai", 
+        content: language === "ar" 
+          ? "حدث خطأ أثناء تصدير الفيديو. يرجى المحاولة مرة أخرى." 
+          : "An error occurred while exporting the video. Please try again."
+      }]);
+    } finally {
       setIsRendering(false);
     }
   };
@@ -362,11 +370,17 @@ function CreateContent() {
     if (initialMode === "prompt" && initialPrompt && messages.length === 1) {
       setTimeout(() => {
         if (!isMounted) return;
+        
+        const initialImage = sessionStorage.getItem('initial_image');
+        if (initialImage) {
+          sessionStorage.removeItem('initial_image');
+        }
+        
         setMessages(prev => {
           if (prev.some(m => m.id === "init")) return prev;
-          return [...prev, { id: "init", role: "user", content: initialPrompt }];
+          return [...prev, { id: "init", role: "user", content: initialPrompt, image: initialImage || undefined }];
         });
-        handleGenerateVideo(initialPrompt);
+        handleGenerateVideo(initialPrompt, undefined, initialImage || undefined);
       }, 0);
     } 
     // Handle initial code mode
@@ -414,7 +428,10 @@ function CreateContent() {
     const userMsg = input.trim() || (language === "ar" ? "صورة مرفقة" : "Attached image");
     const currentImage = selectedImage;
     
-    setMessages(prev => [...prev, { id: generateId(), role: "user", content: userMsg, image: currentImage || undefined }]);
+    const newMessage: Message = { id: generateId(), role: "user", content: userMsg };
+    if (currentImage) newMessage.image = currentImage;
+    
+    setMessages(prev => [...prev, newMessage]);
     setInput("");
     setSelectedImage(null);
     handleGenerateVideo(userMsg, generatedCode, currentImage || undefined);
@@ -427,7 +444,7 @@ function CreateContent() {
     <div className="flex h-[calc(100vh-80px)] overflow-hidden bg-background">
       
       {/* Left Panel: Chat & Edit */}
-      <div className="w-full md:w-[400px] lg:w-[450px] flex flex-col border-r border-border bg-muted/10">
+      <div className={`w-full md:w-[400px] lg:w-[450px] flex-col border-r border-border bg-muted/10 ${mobileView === "chat" ? "flex" : "hidden md:flex"}`}>
         <div className="p-4 border-b border-border flex items-center justify-between bg-background">
           <div className="flex items-center space-x-2 rtl:space-x-reverse">
             <Sparkles className="h-5 w-5 text-primary" />
@@ -437,13 +454,22 @@ function CreateContent() {
                 : t("create.editor")}
             </h2>
           </div>
-          <button 
-            onClick={() => setShowProperties(!showProperties)}
-            className={`p-2 rounded-md transition-colors ${showProperties ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-            title={language === "ar" ? "تعديل الخصائص" : "Edit Properties"}
-          >
-            <Settings2 className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setMobileView("preview")}
+              className="md:hidden p-2 rounded-md transition-colors text-primary bg-primary/10 hover:bg-primary/20"
+              title={language === "ar" ? "معاينة الفيديو" : "Preview Video"}
+            >
+              <Play className="h-4 w-4" />
+            </button>
+            <button 
+              onClick={() => setShowProperties(!showProperties)}
+              className={`p-2 rounded-md transition-colors ${showProperties ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+              title={language === "ar" ? "تعديل الخصائص" : "Edit Properties"}
+            >
+              <Settings2 className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {showProperties ? (
@@ -522,7 +548,35 @@ function CreateContent() {
             </div>
 
             {/* Chat Input */}
-            <div className="p-4 bg-background border-t border-border flex flex-col gap-3">
+            <div 
+              className="p-4 bg-background border-t border-border flex flex-col gap-3"
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const file = e.dataTransfer.files?.[0];
+                if (file && file.type.startsWith('image/')) {
+                  const reader = new FileReader();
+                  reader.onloadend = () => setSelectedImage(reader.result as string);
+                  reader.readAsDataURL(file);
+                }
+              }}
+              onPaste={(e) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.indexOf('image') !== -1) {
+                    const file = items[i].getAsFile();
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onloadend = () => setSelectedImage(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }
+                    break;
+                  }
+                }
+              }}
+            >
               {selectedImage && (
                 <div className="relative w-20 h-20 rounded-md overflow-hidden border border-border">
                   <img src={selectedImage} alt="Selected" className="w-full h-full object-cover" />
@@ -536,6 +590,16 @@ function CreateContent() {
                 </div>
               )}
               <form onSubmit={handleSendMessage} className="relative flex flex-col gap-2">
+                <div className="flex items-center justify-between px-1 mb-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsSeamlessLoop(!isSeamlessLoop)}
+                    className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md transition-colors ${isSeamlessLoop ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                  >
+                    <Repeat className="h-3.5 w-3.5" />
+                    {language === "ar" ? "فيديو لا نهائي (Loop)" : "Seamless Loop"}
+                  </button>
+                </div>
                 <div className="relative flex items-center">
                   <button
                     type="button"
@@ -575,39 +639,51 @@ function CreateContent() {
       </div>
 
       {/* Right Panel: Video Preview */}
-      <div className="hidden md:flex flex-1 flex-col bg-black/5 dark:bg-black/20 relative">
+      <div className={`flex-1 flex-col bg-black/5 dark:bg-black/20 relative ${mobileView === "preview" ? "flex" : "hidden md:flex"}`}>
         <div className={`absolute top-4 ${dir === 'rtl' ? 'right-4' : 'left-4'} flex items-center bg-background/80 backdrop-blur-md border border-border rounded-lg p-1 z-10`}>
           <button 
+            onClick={() => setMobileView("chat")} 
+            className="md:hidden px-2 sm:px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 hover:bg-muted text-muted-foreground"
+            title={language === "ar" ? "المحادثة" : "Chat"}
+          >
+            <MessageSquare className="h-4 w-4" />
+            <span className="hidden sm:inline">{language === "ar" ? "المحادثة" : "Chat"}</span>
+          </button>
+          <button 
             onClick={() => setActiveView("preview")} 
-            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${activeView === "preview" ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-muted text-muted-foreground"}`}
+            className={`px-2 sm:px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${activeView === "preview" ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-muted text-muted-foreground"}`}
+            title={language === "ar" ? "معاينة" : "Preview"}
           >
             <Play className="h-4 w-4" />
-            <span>{language === "ar" ? "معاينة" : "Preview"}</span>
+            <span className="hidden sm:inline">{language === "ar" ? "معاينة" : "Preview"}</span>
           </button>
           <button 
             onClick={() => { setActiveView("code"); setEditedCode(generatedCode); }} 
-            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${activeView === "code" ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-muted text-muted-foreground"}`}
+            className={`px-2 sm:px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${activeView === "code" ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-muted text-muted-foreground"}`}
+            title={language === "ar" ? "الكود" : "Code"}
           >
             <Code className="h-4 w-4" />
-            <span>{language === "ar" ? "الكود" : "Code"}</span>
+            <span className="hidden sm:inline">{language === "ar" ? "الكود" : "Code"}</span>
           </button>
         </div>
 
-        <div className={`absolute top-4 ${dir === 'rtl' ? 'left-4' : 'right-4'} flex items-center space-x-3 rtl:space-x-reverse z-10`}>
+        <div className={`absolute top-4 ${dir === 'rtl' ? 'left-4' : 'right-4'} flex items-center space-x-2 sm:space-x-3 rtl:space-x-reverse z-10`}>
           <Link 
             href="/"
-            className="flex items-center space-x-2 rtl:space-x-reverse bg-background/80 backdrop-blur-md border border-border px-4 py-2 rounded-lg text-sm font-medium hover:bg-background transition-colors"
+            className="flex items-center space-x-2 rtl:space-x-reverse bg-background/80 backdrop-blur-md border border-border px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-background transition-colors"
+            title={t("create.newVideo")}
           >
             <Plus className="h-4 w-4" />
-            <span>{t("create.newVideo")}</span>
+            <span className="hidden sm:inline">{t("create.newVideo")}</span>
           </Link>
           <button 
             onClick={handleExport}
             disabled={isGenerating || !generatedCode || isRendering || activeView === "code"}
-            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-primary/20"
+            className="flex items-center gap-2 bg-primary text-primary-foreground px-3 sm:px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-primary/20"
+            title={t("create.export")}
           >
             {isRendering ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            <span>{isRendering ? "Rendering..." : t("create.export")}</span>
+            <span className="hidden sm:inline">{isRendering ? "Rendering..." : t("create.export")}</span>
           </button>
         </div>
 
